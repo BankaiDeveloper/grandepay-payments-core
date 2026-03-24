@@ -49,54 +49,13 @@ RUN mkdir -p storage/logs storage/app storage/framework/cache storage/framework/
 # Expose Swoole port
 EXPOSE 9501
 
-# Install supervisor
-RUN apk add --no-cache supervisor
-
-# Supervisor config
-COPY <<'SUPERVISORD' /etc/supervisor/conf.d/payments-core.conf
-[supervisord]
-nodaemon=true
-logfile=/dev/stdout
-logfile_maxbytes=0
-
-[program:hypervel]
-command=php /app/artisan serve
-autostart=true
-autorestart=true
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-priority=10
-
-[program:worker-inbound]
-command=php /app/artisan queue:work --queue=payments-webhooks-high --sleep=1 --max-time=3600
-autostart=true
-autorestart=true
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-priority=20
-
-[program:worker-postback]
-command=php /app/artisan queue:work --queue=payments-postbacks-high --sleep=1 --max-time=3600
-autostart=true
-autorestart=true
-stdout_logfile=/dev/stdout
-stdout_logfile_maxbytes=0
-stderr_logfile=/dev/stderr
-stderr_logfile_maxbytes=0
-priority=20
-SUPERVISORD
-
 COPY <<'ENTRYPOINT' /app/entrypoint.sh
 #!/bin/sh
 set -e
 echo "Running migrations..."
 php artisan migrate --force 2>&1 || echo "Migration warning (may already be up to date)"
-echo "Starting supervisor (server + workers)..."
-exec supervisord -c /etc/supervisor/conf.d/payments-core.conf
+echo "Starting Hypervel server with coroutine processors..."
+exec php artisan serve
 ENTRYPOINT
 RUN chmod +x /app/entrypoint.sh
 

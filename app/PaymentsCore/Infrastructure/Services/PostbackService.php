@@ -6,11 +6,11 @@ namespace App\PaymentsCore\Infrastructure\Services;
 
 use App\PaymentsCore\Domain\Contracts\PostbackServiceInterface;
 use App\PaymentsCore\Domain\Support\PostbackNetworkGuard;
-use App\PaymentsCore\Infrastructure\Jobs\SendSinglePostbackJob;
 use App\PaymentsCore\Infrastructure\Models\Enterprise;
 use App\PaymentsCore\Infrastructure\Models\PostbackLog;
 use App\PaymentsCore\Infrastructure\Models\Transaction;
 use App\PaymentsCore\Infrastructure\Models\Withdrawal;
+use Hypervel\Support\Facades\DB;
 use Hypervel\Support\Facades\Log;
 use JsonException;
 
@@ -189,44 +189,59 @@ final class PostbackService implements PostbackServiceInterface
         $signature = $this->signPayload($jsonPayload, $secretKey);
 
         try {
-            $postbackLog = PostbackLog::query()->firstOrCreate(
-                ['event' => $event, 'transaction_id' => $transactionId, 'withdrawal_id' => $withdrawalId],
-                [
-                    'enterprise_id' => $enterprise->id,
-                    'url' => $url,
-                    'payload' => $payload,
-                    'signed_payload' => $jsonPayload,
-                    'signature' => $signature,
-                    'status' => PostbackLog::STATUS_PENDING,
-                ],
-            );
+            $postbackLog = PostbackLog::query()->create([
+                'enterprise_id' => $enterprise->id,
+                'transaction_id' => $transactionId,
+                'withdrawal_id' => $withdrawalId,
+                'event' => $event,
+                'url' => $url,
+                'payload' => $payload,
+                'signed_payload' => $jsonPayload,
+                'signature' => $signature,
+                'status' => PostbackLog::STATUS_PENDING,
+            ]);
         } catch (\Hypervel\Database\QueryException $e) {
-            if (str_contains(strtolower($e->getMessage()), 'unique') || in_array((string) $e->getCode(), ['23000', '23505'], true)) {
-                $postbackLog = PostbackLog::query()
-                    ->where('event', $event)
-                    ->where('transaction_id', $transactionId)
-                    ->where('withdrawal_id', $withdrawalId)
-                    ->first();
+            if ($this->isDuplicateOutboxViolation($e)) {
+                $postbackLog = $this->findExistingOutboxLog($event, $transactionId, $withdrawalId);
 
-                if ($postbackLog) {
+                if ($postbackLog instanceof PostbackLog) {
                     return;
                 }
             }
+
             throw $e;
         }
 
-        if (! $postbackLog->wasRecentlyCreated) {
-            return;
-        }
+    }
 
-        SendSinglePostbackJob::dispatch($postbackLog->id);
+    private function findExistingOutboxLog(string $event, ?int $transactionId, ?int $withdrawalId): ?PostbackLog
+    {
+        return DB::transaction(function () use ($event, $transactionId, $withdrawalId): ?PostbackLog {
+            $query = PostbackLog::query()
+                ->where('event', $event);
 
-        Log::info('Postback dispatched', [
-            'postback_log_id' => $postbackLog->id,
-            'event' => $event,
-            'enterprise_id' => $enterprise->id,
-            'url' => $url,
-        ]);
+            if ($transactionId !== null) {
+                $query->where('transaction_id', $transactionId)
+                    ->whereNull('withdrawal_id');
+            } else {
+                $query->where('withdrawal_id', $withdrawalId)
+                    ->whereNull('transaction_id');
+            }
+
+            return $query
+                ->lockForUpdate()
+                ->first();
+        });
+    }
+
+    private function isDuplicateOutboxViolation(\Hypervel\Database\QueryException $exception): bool
+    {
+        $message = strtolower($exception->getMessage());
+        $sqlState = (string) $exception->getCode();
+
+        return in_array($sqlState, ['23000', '23505'], true)
+            || str_contains($message, 'postback_logs_event_transaction_unique')
+            || str_contains($message, 'postback_logs_event_withdrawal_unique');
     }
 
     private function mapTransactionStatus(int $status): string

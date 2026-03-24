@@ -15,6 +15,7 @@ use App\PaymentsCore\Infrastructure\Services\ProviderWebhookMapper;
 use App\PaymentsCore\Infrastructure\Services\WalletOperationService;
 use App\PaymentsCore\Infrastructure\Services\WalletService;
 use App\PaymentsCore\Infrastructure\Services\WebhookFinancialStateService;
+use App\PaymentsCore\Infrastructure\Services\WebhookBufferService;
 use App\PaymentsCore\Infrastructure\Services\WebhookLogService;
 use App\PaymentsCore\Infrastructure\Services\WithdrawalService;
 use Hypervel\Support\ServiceProvider;

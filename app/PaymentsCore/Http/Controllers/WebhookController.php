@@ -5,43 +5,42 @@ declare(strict_types=1);
 namespace App\PaymentsCore\Http\Controllers;
 
 use App\Http\Controllers\AbstractController;
-use App\PaymentsCore\Application\Actions\PersistInboundWebhookAction;
+use App\PaymentsCore\Infrastructure\Services\WebhookBufferService;
 use Hypervel\Http\Request;
 use Hypervel\Support\Facades\Log;
-use Throwable;
 
 final class WebhookController extends AbstractController
 {
     public function handle(Request $request, string $provider): array
     {
         try {
-            $persistAction = app(PersistInboundWebhookAction::class);
+            $bufferService = app(WebhookBufferService::class);
 
-            $payload = $request->all();
             $rawBody = (string) $request->getBody();
+            $payload = $request->all();
+
             $idempotencyKey = $request->header('Idempotency-Key')
                 ?? $request->header('X-Idempotency-Key')
                 ?? hash('sha256', $rawBody);
 
             $eventType = $payload['event'] ?? $payload['event_type'] ?? $payload['type'] ?? null;
 
-            $result = $persistAction->execute(
-                request: $request,
+            $bufferService->buffer(
                 providerCode: $provider,
-                eventType: $eventType,
                 idempotencyKey: $idempotencyKey,
+                eventType: $eventType,
+                rawBody: $rawBody,
+                headers: $request->headers->all(),
+                ipAddress: $request->ip() ?? '0.0.0.0',
+                requestPath: $request->path() ?? '/api/webhooks/' . $provider,
+                requestMethod: $request->method() ?? 'POST',
             );
 
-            if ($result['status'] === PersistInboundWebhookAction::STATUS_PROVIDER_MISSING) {
-                return ['error' => 'Provider not found'];
-            }
-
             return ['acknowledged' => true];
-        } catch (Throwable $e) {
-            Log::error('Webhook processing error', [
+        } catch (\Throwable $e) {
+            Log::error('Webhook buffer error', [
                 'provider' => $provider,
                 'error' => $e->getMessage(),
-                'file' => $e->getFile() . ':' . $e->getLine(),
             ]);
 
             return ['error' => 'Internal processing error'];

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\PaymentsCore\Domain\Support;
 
+use Hypervel\Support\Facades\Cache;
+
 final class PostbackNetworkGuard
 {
     public static function isAllowedUrl(string $url): bool
@@ -32,22 +34,28 @@ final class PostbackNetworkGuard
             return false;
         }
 
-        if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
-            return self::isAllowedIp($host);
-        }
+        return Cache::remember(
+            self::cacheKey($scheme, $host),
+            max(1, (int) config('postbacks.dns_cache_ttl', 60)),
+            static function () use ($host): bool {
+                if (filter_var($host, FILTER_VALIDATE_IP) !== false) {
+                    return self::isAllowedIp($host);
+                }
 
-        $resolvedIps = self::resolveHostIps($host);
-        if ($resolvedIps === []) {
-            return false;
-        }
+                $resolvedIps = self::resolveHostIps($host);
+                if ($resolvedIps === []) {
+                    return false;
+                }
 
-        foreach ($resolvedIps as $ip) {
-            if (! self::isAllowedIp($ip)) {
-                return false;
+                foreach ($resolvedIps as $ip) {
+                    if (! self::isAllowedIp($ip)) {
+                        return false;
+                    }
+                }
+
+                return true;
             }
-        }
-
-        return true;
+        );
     }
 
     public static function isAllowedIp(string $ip): bool
@@ -116,9 +124,6 @@ final class PostbackNetworkGuard
     {
         $ips = [];
 
-        // Set DNS resolution timeout
-        $ctx = stream_context_create(['socket' => ['timeout' => 2]]);
-
         $ipv4 = @gethostbynamel($host);
         if (is_array($ipv4)) {
             $ips = array_merge($ips, $ipv4);
@@ -176,5 +181,10 @@ final class PostbackNetworkGuard
         }
 
         return in_array($host, $allowedHosts, true);
+    }
+
+    private static function cacheKey(string $scheme, string $host): string
+    {
+        return 'postback_network_guard:' . $scheme . ':' . $host;
     }
 }

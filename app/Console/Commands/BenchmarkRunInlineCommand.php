@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\PaymentsCore\Application\Actions\ProcessInboundWebhookAction;
-use App\PaymentsCore\Infrastructure\Jobs\SendSinglePostbackJob;
 use App\PaymentsCore\Infrastructure\Models\PostbackLog;
 use App\PaymentsCore\Infrastructure\Models\WebhookLog;
+use App\PaymentsCore\Infrastructure\Services\PostbackDispatcherService;
 use App\PaymentsCore\Infrastructure\Services\WebhookLogService;
 use Hypervel\Console\Command;
 
@@ -22,6 +22,7 @@ class BenchmarkRunInlineCommand extends Command
         $limit = (int) $this->option('limit');
         $webhookLogService = app(WebhookLogService::class);
         $action = app(ProcessInboundWebhookAction::class);
+        $postbackDispatcher = app(PostbackDispatcherService::class);
 
         $pending = WebhookLog::query()
             ->where('processing_status', WebhookLog::STATUS_RECEIVED)
@@ -64,29 +65,14 @@ class BenchmarkRunInlineCommand extends Command
             ->whereIn('status', [PostbackLog::STATUS_PENDING, PostbackLog::STATUS_FAILED])
             ->orderBy('id')
             ->limit($limit)
-            ->get();
+            ->count();
 
-        $this->info("Sending {$postbacks->count()} postbacks inline...");
+        $this->info("Sending {$postbacks} postbacks inline...");
 
-        $sent = 0;
-        $postbackFailed = 0;
         $postbackStart = microtime(true);
-
-        foreach ($postbacks as $postbackLog) {
-            try {
-                $job = new SendSinglePostbackJob($postbackLog->id);
-                $job->handle();
-
-                $postbackLog->refresh();
-                if ($postbackLog->status === PostbackLog::STATUS_SENT) {
-                    $sent++;
-                } else {
-                    $postbackFailed++;
-                }
-            } catch (\Throwable $e) {
-                $postbackFailed++;
-            }
-        }
+        $result = $postbackDispatcher->dispatchReadyBatch($limit, min($limit, 200));
+        $sent = $result->sentCount;
+        $postbackFailed = $result->failedCount;
 
         $postbackElapsed = round(microtime(true) - $postbackStart, 2);
         $postbackRate = $postbackElapsed > 0 ? round($sent / $postbackElapsed, 1) : 0;

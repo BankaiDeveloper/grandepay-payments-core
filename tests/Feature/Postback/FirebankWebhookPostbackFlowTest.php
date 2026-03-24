@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Tests\Feature\Postback;
 
-use App\PaymentsCore\Infrastructure\Jobs\SendSinglePostbackJob;
 use App\PaymentsCore\Infrastructure\Models\Enterprise;
 use App\PaymentsCore\Infrastructure\Models\PaymentProvider;
 use App\PaymentsCore\Infrastructure\Models\PostbackLog;
@@ -12,7 +11,6 @@ use App\PaymentsCore\Infrastructure\Models\Transaction;
 use App\PaymentsCore\Infrastructure\Models\Wallet;
 use App\PaymentsCore\Infrastructure\Models\WebhookLog;
 use Hypervel\Foundation\Testing\RefreshDatabase;
-use Hypervel\Support\Facades\Queue;
 use Tests\TestCase;
 
 /**
@@ -30,10 +28,8 @@ class FirebankWebhookPostbackFlowTest extends TestCase
         config()->set('postbacks.benchmark_allowed_hosts', ['127.0.0.1', 'localhost']);
     }
 
-    public function testFirebankPaidWebhookCreatesPostbackAndDispatchesJob(): void
+    public function testFirebankPaidWebhookCreatesPendingPostbackOutboxEntry(): void
     {
-        Queue::fake([SendSinglePostbackJob::class]);
-
         [$transaction, $enterprise] = $this->createPendingFirebankTransaction();
 
         $response = $this->postJson('/api/webhooks/firebank', [
@@ -75,10 +71,6 @@ class FirebankWebhookPostbackFlowTest extends TestCase
             hash_hmac('sha256', (string) $postbackLog->signed_payload, 'enterprise-secret'),
             $postbackLog->signature,
         );
-
-        Queue::assertPushed(SendSinglePostbackJob::class, function (SendSinglePostbackJob $job) use ($postbackLog): bool {
-            return $job->postbackLogId === $postbackLog->id;
-        });
     }
 
     /**
