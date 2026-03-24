@@ -116,30 +116,37 @@ final class PostbackNetworkGuard
     {
         $ips = [];
 
-        $ipv4 = gethostbynamel($host);
+        // Set DNS resolution timeout
+        $ctx = stream_context_create(['socket' => ['timeout' => 2]]);
+
+        $ipv4 = @gethostbynamel($host);
         if (is_array($ipv4)) {
             $ips = array_merge($ips, $ipv4);
         }
 
         if (function_exists('dns_get_record')) {
-            $aRecords = dns_get_record($host, DNS_A);
-            if (is_array($aRecords)) {
-                foreach ($aRecords as $record) {
-                    $ip = $record['ip'] ?? null;
-                    if (is_string($ip) && $ip !== '') {
-                        $ips[] = $ip;
+            try {
+                $aRecords = @dns_get_record($host, DNS_A);
+                if (is_array($aRecords)) {
+                    foreach ($aRecords as $record) {
+                        $ip = $record['ip'] ?? null;
+                        if (is_string($ip) && $ip !== '') {
+                            $ips[] = $ip;
+                        }
                     }
                 }
-            }
 
-            $aaaaRecords = dns_get_record($host, DNS_AAAA);
-            if (is_array($aaaaRecords)) {
-                foreach ($aaaaRecords as $record) {
-                    $ip = $record['ipv6'] ?? null;
-                    if (is_string($ip) && $ip !== '') {
-                        $ips[] = $ip;
+                $aaaaRecords = @dns_get_record($host, DNS_AAAA);
+                if (is_array($aaaaRecords)) {
+                    foreach ($aaaaRecords as $record) {
+                        $ip = $record['ipv6'] ?? null;
+                        if (is_string($ip) && $ip !== '') {
+                            $ips[] = $ip;
+                        }
                     }
                 }
+            } catch (\Throwable) {
+                // DNS resolution failed, continue with what we have
             }
         }
 

@@ -43,11 +43,6 @@ class ProcessInboundWebhookJob implements ShouldQueue
 
         try {
             $action->execute($webhookLog);
-            $webhookLogService->markProcessed(
-                $webhookLog,
-                200,
-                ['queued' => true, 'processed' => true],
-            );
         } catch (\Throwable $exception) {
             Log::error('Inbound webhook job failed', [
                 'webhook_log_id' => $this->webhookLogId,
@@ -58,6 +53,19 @@ class ProcessInboundWebhookJob implements ShouldQueue
             $webhookLogService->markFailed($webhookLog, $exception->getMessage());
 
             throw $exception;
+        }
+
+        try {
+            $webhookLogService->markProcessed(
+                $webhookLog,
+                200,
+                ['queued' => true, 'processed' => true],
+            );
+        } catch (\Throwable $exception) {
+            Log::warning('Webhook processed but status update failed', [
+                'webhook_log_id' => $this->webhookLogId,
+                'error' => $exception->getMessage(),
+            ]);
         }
     }
 

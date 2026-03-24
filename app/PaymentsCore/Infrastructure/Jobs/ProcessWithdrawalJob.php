@@ -79,6 +79,7 @@ class ProcessWithdrawalJob implements ShouldQueue
 
     private function returnFunds(Withdrawal $withdrawal): void
     {
+        /** @var WalletService $walletService */
         $walletService = app(WalletService::class);
 
         if ($withdrawal->funds_state === WithdrawalMode::FUNDS_BLOCKED) {

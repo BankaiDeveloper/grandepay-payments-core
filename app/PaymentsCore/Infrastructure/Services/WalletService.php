@@ -18,15 +18,23 @@ class WalletService
 {
     public function getOrCreateWallet(int $enterpriseId): Wallet
     {
-        return Wallet::firstOrCreate(
-            ['enterprise_id' => $enterpriseId],
-            [
-                'balance_cents' => 0,
-                'blocked_cents' => 0,
-                'currency' => 'BRL',
-                'is_active' => true,
-            ],
-        );
+        $wallet = Wallet::where('enterprise_id', $enterpriseId)->first();
+
+        if ($wallet instanceof Wallet) {
+            return $wallet;
+        }
+
+        return DB::transaction(function () use ($enterpriseId): Wallet {
+            return Wallet::firstOrCreate(
+                ['enterprise_id' => $enterpriseId],
+                [
+                    'balance_cents' => 0,
+                    'blocked_cents' => 0,
+                    'currency' => 'BRL',
+                    'is_active' => true,
+                ],
+            );
+        });
     }
 
     public function credit(
@@ -51,7 +59,7 @@ class WalletService
             }
 
             $wallet = $this->getOrCreateWallet($enterpriseId);
-            $wallet = Wallet::where('id', $wallet->id)->lockForUpdate()->first();
+            $wallet = $this->lockWalletWithTimeout($wallet->id);
 
             $balanceBefore = $wallet->balance_cents;
             $balanceAfter = $balanceBefore + $amountCents;
@@ -114,7 +122,7 @@ class WalletService
     ): WalletTransaction {
         $operation = function () use ($enterpriseId, $amountCents, $providerCode, $description, $initiatedByUserId): WalletTransaction {
             $wallet = $this->getOrCreateWallet($enterpriseId);
-            $wallet = Wallet::where('id', $wallet->id)->lockForUpdate()->first();
+            $wallet = $this->lockWalletWithTimeout($wallet->id);
 
             $availableCents = $wallet->balance_cents - $wallet->blocked_cents;
 
@@ -179,7 +187,7 @@ class WalletService
             }
 
             $wallet = $this->getOrCreateWallet($enterpriseId);
-            $wallet = Wallet::where('id', $wallet->id)->lockForUpdate()->first();
+            $wallet = $this->lockWalletWithTimeout($wallet->id);
 
             $balanceBefore = $wallet->balance_cents;
             $balanceAfter = $balanceBefore - $amountCents;
@@ -275,7 +283,7 @@ class WalletService
             }
 
             $wallet = $this->getOrCreateWallet($enterpriseId);
-            $wallet = Wallet::where('id', $wallet->id)->lockForUpdate()->first();
+            $wallet = $this->lockWalletWithTimeout($wallet->id);
 
             $blockedBefore = $wallet->blocked_cents;
             $blockedAfter = $blockedBefore + $amountCents;
@@ -334,7 +342,7 @@ class WalletService
     ): WalletTransaction {
         $operation = function () use ($enterpriseId, $amountCents, $description, $providerCode, $initiatedByUserId): WalletTransaction {
             $wallet = $this->getOrCreateWallet($enterpriseId);
-            $wallet = Wallet::where('id', $wallet->id)->lockForUpdate()->first();
+            $wallet = $this->lockWalletWithTimeout($wallet->id);
 
             $blockedBefore = $wallet->blocked_cents;
             $blockedAfter = $blockedBefore - $amountCents;
@@ -375,6 +383,13 @@ class WalletService
         };
 
         return $useTransaction ? DB::transaction($operation) : $operation();
+    }
+
+    private function lockWalletWithTimeout(int $walletId, int $timeoutMs = 5000): Wallet
+    {
+        DB::statement("SET LOCAL statement_timeout = '{$timeoutMs}'");
+
+        return Wallet::where('id', $walletId)->lockForUpdate()->firstOrFail();
     }
 
     private function isWebhookLogUniqueViolation(QueryException $exception): bool

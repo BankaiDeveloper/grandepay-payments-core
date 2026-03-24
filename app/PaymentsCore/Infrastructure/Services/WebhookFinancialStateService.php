@@ -11,6 +11,7 @@ use App\PaymentsCore\Infrastructure\Models\Transaction;
 use App\PaymentsCore\Infrastructure\Models\WebhookLog;
 use App\PaymentsCore\Infrastructure\Models\Withdrawal;
 use App\PaymentsCore\Domain\Support\WithdrawalMode;
+use Hypervel\Support\Facades\DB;
 use Hypervel\Support\Facades\Log;
 
 final class WebhookFinancialStateService
@@ -73,54 +74,66 @@ final class WebhookFinancialStateService
 
     public function applyCashInFailed(Transaction $transaction, array $attributes): void
     {
-        if (in_array($transaction->status, [
-            Transaction::STATUS_PAID,
-            Transaction::STATUS_FAILED,
-            Transaction::STATUS_REFUNDED,
-            Transaction::STATUS_CHARGEBACK,
-        ], true)) {
-            return;
-        }
+        DB::transaction(function () use ($transaction, $attributes): void {
+            $transaction = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
-        $transaction->update(array_merge($attributes, [
-            'status' => Transaction::STATUS_FAILED,
-            'failed_at' => now(),
-        ]));
+            if (in_array($transaction->status, [
+                Transaction::STATUS_PAID,
+                Transaction::STATUS_FAILED,
+                Transaction::STATUS_REFUNDED,
+                Transaction::STATUS_CHARGEBACK,
+            ], true)) {
+                return;
+            }
 
-        $this->postbackService->notifyTransaction('transaction.failed', $transaction);
+            $transaction->update(array_merge($attributes, [
+                'status' => Transaction::STATUS_FAILED,
+                'failed_at' => now(),
+            ]));
+
+            $this->postbackService->notifyTransaction('transaction.failed', $transaction);
+        });
     }
 
     public function applyCashInCancelled(Transaction $transaction, array $attributes): void
     {
-        if (in_array($transaction->status, [
-            Transaction::STATUS_PAID,
-            Transaction::STATUS_CANCELLED,
-            Transaction::STATUS_REFUNDED,
-            Transaction::STATUS_CHARGEBACK,
-        ], true)) {
-            return;
-        }
+        DB::transaction(function () use ($transaction, $attributes): void {
+            $transaction = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
-        $transaction->update(array_merge($attributes, [
-            'status' => Transaction::STATUS_CANCELLED,
-        ]));
+            if (in_array($transaction->status, [
+                Transaction::STATUS_PAID,
+                Transaction::STATUS_CANCELLED,
+                Transaction::STATUS_REFUNDED,
+                Transaction::STATUS_CHARGEBACK,
+            ], true)) {
+                return;
+            }
 
-        $this->postbackService->notifyTransaction('transaction.cancelled', $transaction);
+            $transaction->update(array_merge($attributes, [
+                'status' => Transaction::STATUS_CANCELLED,
+            ]));
+
+            $this->postbackService->notifyTransaction('transaction.cancelled', $transaction);
+        });
     }
 
     public function applyCashInPending(Transaction $transaction, array $attributes): void
     {
-        if (in_array($transaction->status, [
-            Transaction::STATUS_PAID,
-            Transaction::STATUS_FAILED,
-            Transaction::STATUS_REFUNDED,
-            Transaction::STATUS_CANCELLED,
-            Transaction::STATUS_CHARGEBACK,
-        ], true)) {
-            return;
-        }
+        DB::transaction(function () use ($transaction, $attributes): void {
+            $transaction = Transaction::query()->whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
-        $transaction->update($attributes);
+            if (in_array($transaction->status, [
+                Transaction::STATUS_PAID,
+                Transaction::STATUS_FAILED,
+                Transaction::STATUS_REFUNDED,
+                Transaction::STATUS_CANCELLED,
+                Transaction::STATUS_CHARGEBACK,
+            ], true)) {
+                return;
+            }
+
+            $transaction->update($attributes);
+        });
     }
 
     public function applyCashInRefunded(

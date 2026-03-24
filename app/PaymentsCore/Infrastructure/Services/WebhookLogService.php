@@ -157,42 +157,45 @@ class WebhookLogService
 
     private function handleDuplicateWebhook(int $paymentProviderId, string $idempotencyKey, array $payload): WebhookLog
     {
-        $existing = WebhookLog::query()
-            ->where('payment_provider_id', $paymentProviderId)
-            ->where('idempotency_key', $idempotencyKey)
-            ->firstOrFail();
+        return DB::transaction(function () use ($paymentProviderId, $idempotencyKey, $payload): WebhookLog {
+            $existing = WebhookLog::query()
+                ->where('payment_provider_id', $paymentProviderId)
+                ->where('idempotency_key', $idempotencyKey)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        if ($existing->processed || in_array($existing->processing_status, [
-            WebhookLog::STATUS_PROCESSING,
-            WebhookLog::STATUS_PROCESSED,
-            WebhookLog::STATUS_IGNORED,
-        ], true)) {
-            return $existing;
-        }
+            if ($existing->processed || in_array($existing->processing_status, [
+                WebhookLog::STATUS_PROCESSING,
+                WebhookLog::STATUS_PROCESSED,
+                WebhookLog::STATUS_IGNORED,
+            ], true)) {
+                return $existing;
+            }
 
-        $updates = [
-            'event_type' => $existing->event_type ?? $payload['event_type'],
-            'provider_event_id' => $existing->provider_event_id ?? $payload['provider_event_id'],
-            'ip_address' => $payload['ip_address'],
-            'headers' => $payload['headers'],
-            'payload' => $payload['payload'],
-            'raw_body' => $payload['raw_body'],
-            'request_path' => $payload['request_path'],
-            'request_method' => $payload['request_method'],
-            'signature_valid' => $payload['signature_valid'],
-            'signature_error' => $payload['signature_error'],
-        ];
+            $updates = [
+                'event_type' => $existing->event_type ?? $payload['event_type'],
+                'provider_event_id' => $existing->provider_event_id ?? $payload['provider_event_id'],
+                'ip_address' => $payload['ip_address'],
+                'headers' => $payload['headers'],
+                'payload' => $payload['payload'],
+                'raw_body' => $payload['raw_body'],
+                'request_path' => $payload['request_path'],
+                'request_method' => $payload['request_method'],
+                'signature_valid' => $payload['signature_valid'],
+                'signature_error' => $payload['signature_error'],
+            ];
 
-        if ($existing->processing_status === WebhookLog::STATUS_FAILED) {
-            $updates['processing_status'] = WebhookLog::STATUS_RECEIVED;
-            $updates['processing_error'] = null;
-            $updates['locked_at'] = null;
-            $updates['processing_job_uuid'] = null;
-        }
+            if ($existing->processing_status === WebhookLog::STATUS_FAILED) {
+                $updates['processing_status'] = WebhookLog::STATUS_RECEIVED;
+                $updates['processing_error'] = null;
+                $updates['locked_at'] = null;
+                $updates['processing_job_uuid'] = null;
+            }
 
-        $existing->update($updates);
+            $existing->update($updates);
 
-        return $existing->refresh();
+            return $existing->refresh();
+        });
     }
 
     private function isUniqueIdempotencyViolation(QueryException $exception): bool

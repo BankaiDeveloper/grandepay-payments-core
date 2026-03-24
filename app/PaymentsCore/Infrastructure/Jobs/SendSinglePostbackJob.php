@@ -126,7 +126,7 @@ class SendSinglePostbackJob implements ShouldQueue
 
             $postback->update([
                 'locked_at' => now(),
-                'processing_job_uuid' => null,
+                'processing_job_uuid' => (string) \Hypervel\Support\Str::uuid(),
             ]);
 
             return $postback;

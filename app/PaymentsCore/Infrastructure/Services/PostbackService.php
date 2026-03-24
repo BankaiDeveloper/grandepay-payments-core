@@ -188,17 +188,32 @@ final class PostbackService implements PostbackServiceInterface
         $secretKey = $settings['secret_key'] ?? $enterprise->secret_key ?? '';
         $signature = $this->signPayload($jsonPayload, $secretKey);
 
-        $postbackLog = PostbackLog::query()->firstOrCreate(
-            ['event' => $event, 'transaction_id' => $transactionId, 'withdrawal_id' => $withdrawalId],
-            [
-                'enterprise_id' => $enterprise->id,
-                'url' => $url,
-                'payload' => $payload,
-                'signed_payload' => $jsonPayload,
-                'signature' => $signature,
-                'status' => PostbackLog::STATUS_PENDING,
-            ],
-        );
+        try {
+            $postbackLog = PostbackLog::query()->firstOrCreate(
+                ['event' => $event, 'transaction_id' => $transactionId, 'withdrawal_id' => $withdrawalId],
+                [
+                    'enterprise_id' => $enterprise->id,
+                    'url' => $url,
+                    'payload' => $payload,
+                    'signed_payload' => $jsonPayload,
+                    'signature' => $signature,
+                    'status' => PostbackLog::STATUS_PENDING,
+                ],
+            );
+        } catch (\Hypervel\Database\QueryException $e) {
+            if (str_contains(strtolower($e->getMessage()), 'unique') || in_array((string) $e->getCode(), ['23000', '23505'], true)) {
+                $postbackLog = PostbackLog::query()
+                    ->where('event', $event)
+                    ->where('transaction_id', $transactionId)
+                    ->where('withdrawal_id', $withdrawalId)
+                    ->first();
+
+                if ($postbackLog) {
+                    return;
+                }
+            }
+            throw $e;
+        }
 
         if (! $postbackLog->wasRecentlyCreated) {
             return;

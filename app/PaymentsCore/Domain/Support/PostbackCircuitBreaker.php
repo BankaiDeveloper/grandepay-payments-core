@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\PaymentsCore\Domain\Support;
 
-use Hypervel\Support\Facades\Cache;
+use Hypervel\Support\Facades\Redis;
 
 final class PostbackCircuitBreaker
 {
@@ -14,25 +14,27 @@ final class PostbackCircuitBreaker
 
     public static function isAvailable(int $enterpriseId): bool
     {
-        return ! Cache::has(self::openKey($enterpriseId));
+        return ! (bool) Redis::get(self::openKey($enterpriseId));
     }
 
     public static function recordSuccess(int $enterpriseId): void
     {
-        Cache::forget(self::failureCountKey($enterpriseId));
-        Cache::forget(self::openKey($enterpriseId));
+        Redis::del(self::failureCountKey($enterpriseId));
+        Redis::del(self::openKey($enterpriseId));
     }
 
     public static function recordFailure(int $enterpriseId): void
     {
         $key = self::failureCountKey($enterpriseId);
-        $count = (int) Cache::get($key, 0) + 1;
+        $count = (int) Redis::incr($key);
 
-        Cache::put($key, $count, self::FAILURE_WINDOW_SECONDS);
+        if ($count === 1) {
+            Redis::expire($key, self::FAILURE_WINDOW_SECONDS);
+        }
 
         if ($count >= self::FAILURE_THRESHOLD) {
-            Cache::put(self::openKey($enterpriseId), true, self::OPEN_DURATION_SECONDS);
-            Cache::forget($key);
+            Redis::setex(self::openKey($enterpriseId), self::OPEN_DURATION_SECONDS, '1');
+            Redis::del($key);
         }
     }
 

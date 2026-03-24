@@ -24,4 +24,5 @@
 /storage/logs/*.jsonl
 /storage/app/benchmarks/*.json
 __pycache__/
-*.pyc
+*.pycmnt/
+mnt/

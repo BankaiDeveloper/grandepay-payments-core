@@ -7,6 +7,7 @@ namespace App\PaymentsCore\Http\Controllers;
 use App\Http\Controllers\AbstractController;
 use App\PaymentsCore\Application\Actions\PersistInboundWebhookAction;
 use Hypervel\Http\Request;
+use Hypervel\Support\Facades\Log;
 use Throwable;
 
 final class WebhookController extends AbstractController
@@ -37,7 +38,13 @@ final class WebhookController extends AbstractController
 
             return ['acknowledged' => true];
         } catch (Throwable $e) {
-            return ['error' => $e->getMessage(), 'file' => $e->getFile() . ':' . $e->getLine()];
+            Log::error('Webhook processing error', [
+                'provider' => $provider,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile() . ':' . $e->getLine(),
+            ]);
+
+            return ['error' => 'Internal processing error'];
         }
     }
 }
