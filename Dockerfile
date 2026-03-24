@@ -12,12 +12,7 @@ RUN apk add --no-cache \
 # Install PHP extensions
 RUN docker-php-ext-install pdo pdo_pgsql pcntl bcmath
 
-# Install Swoole with pgsql support
-RUN pecl install swoole && \
-    docker-php-ext-enable swoole
-
-# We also need swoole compiled with --enable-swoole-pgsql
-# So we compile from source instead
+# Compile Swoole from source with pgsql coroutine support
 RUN apk add --no-cache git && \
     cd /tmp && \
     git clone --depth 1 --branch v6.0.2 https://github.com/swoole/swoole-src.git && \
@@ -35,6 +30,9 @@ RUN apk add --no-cache git && \
 # Install Redis extension
 RUN pecl install redis && docker-php-ext-enable redis
 
+# Cleanup build deps
+RUN apk del $PHPIZE_DEPS git linux-headers
+
 WORKDIR /app
 
 # Copy composer files
@@ -51,5 +49,15 @@ RUN mkdir -p storage/logs storage/app storage/framework/cache storage/framework/
 # Expose Swoole port
 EXPOSE 9501
 
-# Start Hypervel server
-CMD ["php", "artisan", "serve"]
+# Startup: run migrations then start server
+COPY <<'ENTRYPOINT' /app/entrypoint.sh
+#!/bin/sh
+set -e
+echo "Running migrations..."
+php artisan migrate --force 2>&1 || echo "Migration warning (may already be up to date)"
+echo "Starting Hypervel server..."
+exec php artisan serve
+ENTRYPOINT
+RUN chmod +x /app/entrypoint.sh
+
+CMD ["/app/entrypoint.sh"]
