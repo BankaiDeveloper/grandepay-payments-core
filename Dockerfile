@@ -55,6 +55,11 @@ COPY <<'ENTRYPOINT' /app/entrypoint.sh
 set -e
 echo "Running migrations..."
 php artisan migrate --force 2>&1 || echo "Migration warning (may already be up to date)"
+
+echo "Starting queue workers in background..."
+php artisan queue:work --queue=payments-webhooks-high --sleep=1 --max-time=3600 &
+php artisan queue:work --queue=payments-postbacks-high --sleep=1 --max-time=3600 &
+
 echo "Starting Hypervel server..."
 exec php artisan serve
 ENTRYPOINT
